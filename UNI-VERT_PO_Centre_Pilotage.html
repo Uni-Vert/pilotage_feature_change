@@ -165,6 +165,7 @@
         <div class="field"><label>Escompte (%)</label><input type="number" id="a-escpct" value="0" step="0.5"></div>
         <div class="field"><label>Taux FO %</label><input type="number" id="a-taux" value="40" step="0.5"></div>
         <div class="field"><label>Mode de paiement</label><select id="a-paie"><option>Virement</option><option>Cheque</option><option>Prelevement</option><option>CB</option><option>Autre</option></select></div>
+        <div class="field"><label>Type de dépense</label><select id="a-origine"><option value="declaree" selected>Déclarée</option><option value="facture_ocr">Consommé</option></select></div>
         <div class="field"><label>Ligne RPD ?</label><select id="a-rpd"><option value="0">Non (eligible)</option><option value="1">Oui (RPD, non eligible)</option></select></div>
       </div>
       <div class="row" style="margin-top:10px">
@@ -674,7 +675,10 @@ function aSave(){var qte=+document.getElementById('a-qte').value||0,pu=+document
   var prodNom=document.getElementById('a-prod').value;var t=+document.getElementById('a-taux').value||0;
   var fo=Math.round((ht-escMontant)*t/100*100)/100;
   var m=compute();var pr=m.byProd.find(function(p){return p.nom===prodNom;});
-  var doSave=function(){var nd={prod:prodNom,mes:document.getElementById('a-mes').value,des:document.getElementById('a-des').value.trim(),ht:ht,esc:escMontant,escpct:escpct,taux:t,paie:document.getElementById('a-paie').value,origine:'facture_ocr',
+  var doSave=function(){
+    var nd={prod:prodNom,mes:document.getElementById('a-mes').value,des:document.getElementById('a-des').value.trim(),ht:ht,esc:escMontant,escpct:escpct,taux:t,
+    paie:document.getElementById('a-paie').value,
+    origine:document.getElementById('a-origine').value,
     codeAction:document.getElementById('a-code-action').value.trim(),
     categorie:document.getElementById('a-categorie').value,
     fournisseur:document.getElementById('a-fournisseur').value.trim(),
@@ -684,7 +688,11 @@ function aSave(){var qte=+document.getElementById('a-qte').value||0,pu=+document
     ttcFacture:document.getElementById('a-ttc-facture').value?+document.getElementById('a-ttc-facture').value:null,
     ttcPaye:document.getElementById('a-ttc-paye').value?+document.getElementById('a-ttc-paye').value:null,
     commentaires:document.getElementById('a-commentaires').value.trim()};
-    state.deps.push(nd);save();syncDepenseRow(nd,'facture_ocr');noterMesureArchivage(nd);renderAll();alert('Ligne enregistree.');};
+    state.deps.push(nd);save();syncDepenseRow(nd, origineOf(nd));noterMesureArchivage(nd);renderAll();
+    // Préparer la prochaine saisie manuelle
+    document.getElementById('a-origine').value = 'declaree';
+    alert('Ligne enregistree.');
+  };
   if(pr&&(pr.conso+fo)>pr.dot){confirmModal("Depassement de dotation",("Cette ligne porte la consommation de "+prodNom+" a "+eur(pr.conso+fo)+", au-dela de sa dotation ("+eur(pr.dot)+"). Enregistrer quand meme ?"),doSave);}
   else doSave();
 }
@@ -711,7 +719,61 @@ function editDep(i){var d=state.deps[i];
     {id:'e-escpct',lab:'Escompte %',val:d.escpct||0,num:true},
     {id:'e-taux',lab:'Taux FO %',val:d.taux,num:true},
     {id:'e-paie',lab:'Mode de paiement',val:d.paie||''}
-  ],function(){d.des=document.getElementById('e-des').value.trim();d.ht=+document.getElementById('e-ht').value||0;d.escpct=+document.getElementById('e-escpct').value||0;d.esc=Math.round(d.ht*d.escpct/100*100)/100;d.taux=+document.getElementById('e-taux').value||0;d.paie=document.getElementById('e-paie').value;delete d.foFixe;save();syncDepenseRow(d,'facture_ocr');renderAll();});
+  ],function(){
+    d.des=document.getElementById('e-des').value.trim();
+    d.ht=+document.getElementById('e-ht').value||0;
+    d.escpct=+document.getElementById('e-escpct').value||0;
+    d.esc=Math.round(d.ht*d.escpct/100*100)/100;
+    d.taux=+document.getElementById('e-taux').value||0;
+    d.paie=document.getElementById('e-paie').value;
+    var nouvelleOrigine = document.getElementById('e-origine').value;
+    d.origine = nouvelleOrigine;
+    if (nouvelleOrigine === 'facture_ocr') {d.actif = true;}
+    
+    delete d.foFixe;
+    save();
+    syncDepenseRow(d,origineOf(d));
+    renderAll();
+  });
+   // Ajouter le choix du type de dépense
+  var container = document.querySelector('#modal-body .modal-grid');
+
+  var field = document.createElement('div');
+  field.className = 'field';
+
+  var label = document.createElement('label');
+  label.textContent = 'Type de dépense';
+
+  var select = document.createElement('select');
+  select.id = 'e-origine';
+
+  var choix = [
+    {value:'declaree', label:'Déclarée'},
+    {value:'facture_ocr', label:'Consommé'}
+  ];
+
+  choix.forEach(function(c) {
+    var option = document.createElement('option');
+    option.value = c.value;
+    option.textContent = c.label;
+    select.appendChild(option);
+  });
+
+  select.value = origineOf(d);
+
+  // Conserver les dépenses obligatoires
+  if (origineOf(d) === 'obligatoire') {
+    var option = document.createElement('option');
+    option.value = 'obligatoire';
+    option.textContent = 'Obligatoire';
+    select.appendChild(option);
+    select.value = 'obligatoire';
+    select.disabled = true;
+  }
+
+  field.appendChild(label);
+  field.appendChild(select);
+  if (container) {container.appendChild(field);}
 }
 // Decoche/coche une depense declaree : quand decochee, elle est exclue de tous les calculs Synthese
 // (car la vraie facture sera importee separement et comptera dans le "consomme"), sans etre supprimee.
@@ -1060,6 +1122,7 @@ function utiliserLigneImportee(i){
   document.getElementById('a-ttc-facture').value=(l.nbLignesFacture===1&&l.montantTtcFacture!=null)?l.montantTtcFacture:'';
   document.getElementById('a-ttc-paye').value='';
   document.getElementById('a-commentaires').value='';
+  document.getElementById('a-origine').value='facture_ocr';
   l.utilisee=true;
   afficherLignesImportees();
   try{document.getElementById('a-prod').scrollIntoView({behavior:'smooth',block:'center'});}catch(e){}
@@ -1559,6 +1622,7 @@ function utiliserLigneValidee(i){
   }
 
   document.getElementById('a-commentaires').value='Extrait automatiquement par IA depuis '+(factureFichier?factureFichier.name:'la facture')+' - a verifier';
+  document.getElementById('a-origine').value = 'facture_ocr';
 
   aAuto();
   aPrev();
