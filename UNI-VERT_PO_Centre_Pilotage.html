@@ -398,6 +398,35 @@ function nextDepId(){
 }
 // Meta de la derniere facture analysee par l'IA (fournisseur/numero/date), reinitialisee a chaque nouveau depot de fichier.
 var factureMeta=null;
+
+function excelDateToFR(value){
+  if(value === null || value === undefined || value === ''){
+    return '';
+  }
+
+  var s = String(value).trim();
+
+  // Excel date serial number
+  if(/^\d{5}(\.\d+)?$/.test(s)){
+    var serial = Number(s);
+
+    if(serial >= 20000 && serial <= 80000){
+      var date = new Date(
+        Math.round((serial - 25569) * 86400000)
+      );
+
+      var day = String(date.getUTCDate()).padStart(2,'0');
+      var month = String(date.getUTCMonth()+1).padStart(2,'0');
+      var year = date.getUTCFullYear();
+
+      return day+'/'+month+'/'+year;
+    }
+  }
+
+  // Other supported formats, including YYYY-MM-DD
+  return fmtDateFR(value);
+}
+
 function fmtDateFR(s){
   // accepte 'YYYY-MM-DD' ou deja 'JJ/MM/AAAA' ; renvoie JJ/MM/AAAA ou tel quel si non reconnu
   if(!s)return '';
@@ -481,7 +510,33 @@ function loadFromSheetsGranular(cb){
       var rawOrigine=(d.Origine||'facture_ocr').toLowerCase();
       var actif=true, origineFinale=rawOrigine;
       if(rawOrigine==='declaree_exclue'){origineFinale='declaree';actif=false;}
-      var obj={id:d.Depense_ID,prod:idApp(d.Producteur_ID),mes:d.Code_Mesure||'',des:d.Objet_depense||'',ht:ht,esc:0,escpct:0,taux:taux,paie:d.Type_paiement||'',foFixe:fo,categorie:d.Categorie_depenses||'',origine:origineFinale,actif:actif,commentaires:d.Commentaires||'',releveBancaire:(''+(d.Releve_bancaire||'')).toLowerCase()==='oui',infoProducteur:d['Info producteur']||d.Info_producteur||''};
+      var obj={
+        id:d.Depense_ID,
+        prod:idApp(d.Producteur_ID),
+        mes:d.Code_Mesure||'',
+        des:d.Objet_depense||'',
+        ht:ht,
+        esc:0,
+        escpct:0,
+        taux:taux,
+        paie:d.Type_paiement||'',
+        foFixe:fo,
+        categorie:d.Categorie_depenses||'',
+        origine:origineFinale,
+        actif:actif,
+        commentaires:d.Commentaires||'',
+        releveBancaire:(''+(d.Releve_bancaire||'')).toLowerCase()==='oui',
+        infoProducteur:d['Info producteur']||d.Info_producteur||'',
+
+        // Champs FranceAgriMer recuperes depuis SharePoint
+        codeAction:d.Code_action||'',
+        fournisseur:d.Emise_par||'',
+        nfacture:d.N_facture||'',
+        dateEmission:excelDateToFR(d.Date_emission),
+        dateAcq:excelDateToFR(d.Date_acquittement),
+        ttcPaye:d.Montant_TTC_paye!==''&&d.Montant_TTC_paye!=null
+         ? d.Montant_TTC_paye : ''
+      };
       deps.push(obj); // toutes les lignes de l'onglet Depenses vont dans la liste "Depenses" de l'app ; "Depenses OP" reste un sujet a part, non reconstruit ici
     });
     state={prods:prods,deps:deps,ops:ops};
