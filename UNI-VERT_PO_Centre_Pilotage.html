@@ -45,6 +45,7 @@
   button{background:var(--vert);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;}
   button:hover{background:var(--vert-f);} button.sec{background:#fff;color:var(--vert);border:1px solid var(--vert);}
   button.danger{background:#fff;color:var(--rouge);border:1px solid var(--rouge);} button.mini{padding:3px 8px;font-size:11px;}
+  button:disabled{opacity:.5;cursor:not-allowed;}
   .note{font-size:12px;color:var(--gris);margin-top:8px;line-height:1.5;}
   .foot{text-align:center;color:var(--gris);font-size:12px;margin-top:18px;}
   .saved{font-size:11px;color:var(--vert);opacity:0;transition:opacity .3s;} .saved.show{opacity:1;}
@@ -195,6 +196,7 @@
         <div class="field"><label>Filtrer par mesure</label><select id="flt-mes" onchange="renderDep()"><option value="">Toutes</option></select></div>
         <div class="field"><label>Releve bancaire</label><select id="flt-releve" onchange="renderDep()"><option value="">Tous</option><option value="oui">Recu</option><option value="non">Manquant</option></select></div>
         <button class="sec" onclick="document.getElementById('flt-prod').value='';document.getElementById('flt-mes').value='';renderDep();">Reinitialiser</button>
+        <button id="btn-emails" style="margin-left:auto" onclick="ouvrirPreparationEmails()" disabled>Preparer les emails (0)</button>
       </div>
       <div class="scroll"><table><thead><tr><th>Producteur</th><th>Mesure</th><th>Designation</th><th>HT</th><th>Taux</th><th>FO</th><th>Paiement</th><th>Origine</th><th>Releve bq.</th><th>Info producteur</th><th></th></tr></thead><tbody id="tb-dep"></tbody></table></div>
       <div class="note">Cliquez sur le crayon pour modifier une ligne, sur la croix pour la supprimer (avec confirmation).</div>
@@ -284,6 +286,9 @@
 
 <div class="modal" id="modal"><div class="modal-box"><h3 id="modal-title"></h3><div id="modal-body"></div>
   <div class="row" style="margin-top:16px;justify-content:flex-end"><button class="sec" onclick="closeModal()">Annuler</button><button id="modal-ok">Confirmer</button></div></div></div>
+<div class="modal" id="modal-mail"><div class="modal-box" style="max-width:920px"><h3>Emails aux producteurs - informations a notifier</h3><div id="mail-body"></div>
+  <div class="row" style="margin-top:16px;justify-content:flex-end"><button class="sec" onclick="fermerPreparationEmails()">Fermer</button></div></div></div>
+<div id="mail-copie" style="position:fixed;left:-9999px;top:0" aria-hidden="true"></div>
 <script>
 const MESURES={"3.4.7":{lib:"Plants greffes",taux:40},"3.4.7c":{lib:"Plants greffes concombre",taux:37},"3.4.8":{lib:"Semences et plants particuliers",taux:50},"3.4.9":{lib:"Produits de biocontrole",taux:100},"2.16":{lib:"Chaine du froid / conservation",taux:90},"2.31":{lib:"Paillages et voiles",taux:55},"3.5.3":{lib:"Paillage vegetal maraichage",taux:34},"3.3.1":{lib:"Gestion eau exploitation",taux:15.5},"3.3.2":{lib:"Gestion eau station",taux:15.7},"3.7.1":{lib:"Economie d energie",taux:15.7},"3.7.2":{lib:"Energies renouvelables",taux:100},"1.26":{lib:"Materiel assistance production",taux:0},"1.29":{lib:"Serres et abris",taux:0},"1.30":{lib:"Gestion ressource en eau",taux:0},"1.33":{lib:"Tri, stockage, conditionnement",taux:0},"2.21":{lib:"Demarches qualite",taux:0},"3.2.1":{lib:"Production integree",taux:0}};
 // Intitule d'une mesure : cherche en priorite dans le referentiel PO (95 mesures), puis dans MESURES (raccourcis),
@@ -448,7 +453,8 @@ function syncDepenseRow(d,origine){
     Montant_HT_pris_en_charge_FO:fo, Montant_TTC_facture:ttc,
     Type_paiement:d.paie||d.type||'', Date_acquittement:fmtDateFR(d.dateAcq), Montant_TTC_paye:d.ttcPaye!=null?d.ttcPaye:'',
     Montant_total_action_producteur:fo, Objet_depense:d.des||'', Commentaires:d.commentaires||'',
-    Releve_bancaire:d.releveBancaire?'Oui':'Non', Info_producteur:d.infoProducteur||''};
+    Releve_bancaire:d.releveBancaire?'Oui':'Non', Info_producteur:d.infoProducteur||'',
+    Info_a_notifier:d.infoANotifier?'Oui':'', Info_notifiee_le:fmtDateFR(d.infoNotifieeLe)||''};
   return fetch(N8N_PO_STATE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(function(){});
 }
 // Marque une ligne comme supprimee dans l'onglet Depenses (pas de suppression physique de ligne,
@@ -466,9 +472,10 @@ function deleteDepenseRow(d){
   fetch(N8N_PO_STATE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(function(){});
 }
 function syncProducteurRow(p){
+  // Seules les colonnes envoyees sont ecrites (upsert n8n) : Nom_gerant, Adresse, SIRET, N_PACAGE, Token...
+  // ne sont pas modifiables dans la page, on ne les envoie donc pas pour ne jamais les effacer.
   var payload={action:'add_producteur',
-    Producteur_ID:idSheet(p.nom), Raison_sociale:idSheet(p.nom), Nom_gerant:'', Prenom_gerant:'',
-    Adresse:'', Code_postal:'', Commune:'', SIRET:'', N_PACAGE:''};
+    Producteur_ID:idSheet(p.nom), Raison_sociale:idSheet(p.nom), Email:p.mail||''};
   fetch(N8N_PO_STATE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(function(){});
   syncEnveloppeRow(p);
 }
@@ -495,7 +502,7 @@ function loadFromSheetsGranular(cb){
     renv.forEach(function(e){if(!e.Campagne_ID||e.Campagne_ID===CAMPAGNE_ID)envByProd[idApp(e.Producteur_ID)]=parseFloat(e.Montant_enveloppe)||0;});
     var known={};
     var prods=rprod.filter(function(p){return p.Producteur_ID;}).map(function(p){var code=idApp(p.Producteur_ID);known[code]=true;
-      return {nom:code,mail:'',dot:envByProd[code]||0,dot41:0,consoInit:0,
+      return {nom:code,mail:p.Email||'',dot:envByProd[code]||0,dot41:0,consoInit:0,
         nomGerant:p.Nom_gerant||'',prenomGerant:p.Prenom_gerant||'',adresse:p.Adresse||'',
         cp:p.Code_postal||'',commune:p.Commune||'',siret:p.SIRET||'',pacage:p.N_PACAGE||''};});
     Object.keys(envByProd).forEach(function(id){if(!known[id]){prods.push({nom:id,mail:'',dot:envByProd[id],dot41:0,consoInit:0});known[id]=true;}});
@@ -527,6 +534,8 @@ function loadFromSheetsGranular(cb){
         commentaires:d.Commentaires||'',
         releveBancaire:(''+(d.Releve_bancaire||'')).toLowerCase()==='oui',
         infoProducteur:d['Info producteur']||d.Info_producteur||'',
+        infoANotifier:(''+(d.Info_a_notifier||'')).trim().toLowerCase()==='oui',
+        infoNotifieeLe:excelDateToFR(d.Info_notifiee_le),
 
         // Champs FranceAgriMer recuperes depuis SharePoint
         codeAction:d.Code_action||'',
@@ -655,7 +664,8 @@ function renderDep(){
     var oriLab=ori==='obligatoire'?'<span class="tag surv">Obligatoire</span>':ori==='declaree'?('<span class="tag prio">Declaree</span> <label style="font-size:10px;font-weight:400"><input type="checkbox" '+(actif?'checked':'')+' onchange="toggleActifDeclaree('+i+',this.checked)"> incluse dans le calcul</label>'):'<span class="tag bon">Consomme</span>';
     var greye=(ori==='declaree'&&!actif);
     var releveCb='<input type="checkbox" '+(d.releveBancaire?'checked':'')+' onchange="toggleReleveBancaire('+i+',this.checked)">';
-    var infoProd='<span class="note" title="'+(d.infoProducteur||'').replace(/"/g,'&quot;')+'">'+(d.infoProducteur?(d.infoProducteur.length>24?d.infoProducteur.slice(0,24)+'...':d.infoProducteur):'-')+'</span> <button class="mini sec" onclick="editerInfoProducteur('+i+')" title="Modifier">crayon</button>';
+    var infoTag=d.infoANotifier?'<span class="tag surv">a notifier</span> ':(d.infoNotifieeLe?'<span class="tag bon" title="Notifie le '+d.infoNotifieeLe+'">notifie</span> ':'');
+    var infoProd=infoTag+'<span class="note" title="'+(d.infoProducteur||'').replace(/"/g,'&quot;')+'">'+(d.infoProducteur?(d.infoProducteur.length>24?d.infoProducteur.slice(0,24)+'...':d.infoProducteur):'-')+'</span> <button class="mini sec" onclick="editerInfoProducteur('+i+')" title="Modifier">crayon</button>';
     return '<tr'+(incomplet?' style="background:#FFF3E0"':greye?' style="opacity:.45"':(!d.releveBancaire?' style="background:#FFEBEE"':''))+'><td>'+(d.prod||'<span style="color:var(--orange)">?</span>')+'</td><td>'+(d.mes||'<span style="color:var(--orange)">?</span>')+'</td><td>'+(d.des||'')+'</td><td style="font-variant-numeric:tabular-nums">'+eur(d.ht)+'</td><td>'+d.taux+'%</td><td style="font-variant-numeric:tabular-nums;color:var(--vert);font-weight:600">'+eur(foOf(d))+'</td><td>'+(d.paie||'')+'</td><td>'+oriLab+'</td><td style="text-align:center">'+releveCb+'</td><td>'+infoProd+'</td><td>'+(incomplet?'<button class="mini" onclick="completerLigne('+i+')">Completer</button> ':'')+'<button class="mini sec" onclick="editDep('+i+')">crayon</button> <button class="mini danger" onclick="askDelDep('+i+')">X</button></td></tr>';
   }).join('')||'<tr><td colspan="11" class="note">Aucune depense (ou filtre trop restrictif).</td></tr>';
   // Totaux : selection courante (filtre producteur/mesure/releve) + total general toutes lignes
@@ -664,6 +674,7 @@ function renderDep(){
   var html='<b>Selection'+(fp?' ('+fp+')':'')+(fm?' - mesure '+fm:'')+(fr?' - releve '+(fr==='oui'?'recu':'manquant'):'')+'</b> : '+rows.length+' ligne(s) - HT '+eur(selHt)+' - FO '+eur(selFo);
   if(fp||fm||fr)html+='<br><b>Total general (toutes lignes)</b> : '+state.deps.length+' ligne(s) - HT '+eur(totHt)+' - FO '+eur(totFo);
   document.getElementById('dep-totaux').innerHTML=html;
+  majBoutonEmails();
 }
 function renderOp(){
   document.getElementById('tb-op').innerHTML=(state.ops||[]).map(function(d,i){
@@ -855,7 +866,12 @@ function editerInfoProducteur(i){
     +'<textarea id="ip-texte" style="width:100%;height:90px">'+(d.infoProducteur||'').replace(/</g,'&lt;')+'</textarea></div>'
     +'</div>';
   modalCb=function(){
+    var avant=(d.infoProducteur||'').trim();
     d.infoProducteur=document.getElementById('ip-texte').value;
+    var apres=d.infoProducteur.trim();
+    // Texte modifie -> ligne a notifier ; texte vide -> plus rien a notifier
+    if(!apres)d.infoANotifier=false;
+    else if(apres!==avant)d.infoANotifier=true;
     save();syncDepenseRow(d,origineOf(d));renderAll();
   };
   var ok=document.getElementById('modal-ok');ok.textContent='Enregistrer';
@@ -863,6 +879,126 @@ function editerInfoProducteur(i){
   document.getElementById('modal').classList.add('show');
 }
 function askDelDep(i){confirmModal("Supprimer cette ligne ?","Attention, souhaitez-vous vraiment supprimer cette depense ?",function(){deleteDepenseRow(state.deps[i]);state.deps.splice(i,1);save();renderAll();});}
+
+// ---- Emails aux producteurs (Info producteur a notifier) ----
+// Une ligne est "a notifier" quand son Info producteur a ete modifiee dans la page et pas encore notifiee.
+// L'email s'ouvre dans Outlook (mailto) ; le corps avec tableau est copie dans le presse-papiers (Ctrl+V).
+var MAIL_OBJET='PO 2026 \u2013 Informations sur vos d\u00e9penses';
+var mailOuverts={}; // producteur -> 'ok' | 'echec' : email ouvert, en attente de confirmation d'envoi
+function depsANotifier(){
+  return state.deps.filter(function(d){return d.infoANotifier&&d.prod&&(d.infoProducteur||'').trim();});
+}
+function groupesANotifier(){
+  var g={};
+  depsANotifier().forEach(function(d){(g[d.prod]=g[d.prod]||[]).push(d);});
+  return Object.keys(g).sort().map(function(prod){return {prod:prod,deps:g[prod]};});
+}
+function groupeDe(prod){return groupesANotifier().find(function(x){return x.prod===prod;});}
+function majBoutonEmails(){
+  var b=document.getElementById('btn-emails');if(!b)return;
+  var n=depsANotifier().length;
+  b.textContent='Preparer les emails ('+n+')';
+  b.disabled=!n;
+}
+function emailsDe(prod){
+  var re=/^[^\s@;,]+@[^\s@;,]+\.[^\s@;,]+$/;
+  var liste=(findProd(prod).mail||'').split(/[;,]/).map(function(s){return s.trim();}).filter(Boolean);
+  return {valides:liste.filter(function(s){return re.test(s);}),invalides:liste.filter(function(s){return !re.test(s);})};
+}
+function echapHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function montantMail(n){return (Number(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+'\u00a0\u20ac';}
+var MAIL_INTRO='Suite \u00e0 l\u2019examen de vos d\u00e9penses d\u00e9clar\u00e9es dans le cadre du Programme Op\u00e9rationnel 2026, nous avons des informations / demandes concernant les lignes suivantes :';
+var MAIL_FIN='Merci de nous faire un retour d\u00e8s que possible.';
+function corpsMailHtml(deps){
+  var td='border:1px solid #999;padding:4px 8px;vertical-align:top;';
+  var th=td+'background:#E8F5E9;text-align:left;';
+  var lignes=deps.map(function(d){
+    return '<tr><td style="'+td+'">'+echapHtml(d.mes)+'</td><td style="'+td+'">'+echapHtml(d.des)+'</td><td style="'+td+'">'+echapHtml(d.nfacture)
+      +'</td><td style="'+td+'text-align:right;white-space:nowrap">'+montantMail(d.ht)+'</td><td style="'+td+'">'+echapHtml((d.infoProducteur||'').trim()).replace(/\r?\n/g,'<br>')+'</td></tr>';
+  }).join('');
+  return '<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt">'
+    +'<p>Bonjour,</p><p>'+MAIL_INTRO+'</p>'
+    +'<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:10pt">'
+    +'<tr><th style="'+th+'">Mesure</th><th style="'+th+'">D\u00e9signation</th><th style="'+th+'">N\u00b0 facture</th><th style="'+th+'">Montant HT</th><th style="'+th+'">Information</th></tr>'
+    +lignes+'</table><p>'+MAIL_FIN+'</p><p>Cordialement,</p></div>';
+}
+function corpsMailTexte(deps){
+  return 'Bonjour,\n\n'+MAIL_INTRO+'\n\n'+deps.map(function(d){
+    return '- Mesure '+(d.mes||'')+' | '+(d.des||'')+' | Facture '+(d.nfacture||'-')+' | '+montantMail(d.ht)+'\n  '+(d.infoProducteur||'').trim().replace(/\r?\n/g,'\n  ');
+  }).join('\n')+'\n\n'+MAIL_FIN+'\n\nCordialement,';
+}
+// Copie HTML + texte : API Clipboard si disponible, sinon selection d'un bloc cache + execCommand('copy')
+function copierContenuMail(html,texte){
+  if(navigator.clipboard&&window.ClipboardItem&&window.isSecureContext){
+    return navigator.clipboard.write([new ClipboardItem({
+      'text/html':new Blob([html],{type:'text/html'}),
+      'text/plain':new Blob([texte],{type:'text/plain'})
+    })]).then(function(){return true;}).catch(function(){return copierParSelection(html);});
+  }
+  return Promise.resolve(copierParSelection(html));
+}
+function copierParSelection(html){
+  var box=document.getElementById('mail-copie');box.innerHTML=html;
+  var sel=window.getSelection(),r=document.createRange();r.selectNodeContents(box);
+  sel.removeAllRanges();sel.addRange(r);
+  var ok=false;try{ok=document.execCommand('copy');}catch(e){}
+  sel.removeAllRanges();box.innerHTML='';
+  return ok;
+}
+function ouvrirEmail(prod){
+  var g=groupeDe(prod);if(!g)return;
+  var em=emailsDe(prod);
+  copierContenuMail(corpsMailHtml(g.deps),corpsMailTexte(g.deps)).then(function(ok){
+    var a=document.createElement('a');
+    a.href='mailto:'+em.valides.join(',')+'?subject='+encodeURIComponent(MAIL_OBJET);
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    mailOuverts[prod]=ok?'ok':'echec';
+    renderPreparationEmails();
+  });
+}
+function recopierContenu(prod){
+  var g=groupeDe(prod);if(!g)return;
+  copierContenuMail(corpsMailHtml(g.deps),corpsMailTexte(g.deps)).then(function(ok){mailOuverts[prod]=ok?'ok':'echec';renderPreparationEmails();});
+}
+// Etape 2 : apres l'envoi, Vanessa confirme -> lignes demarquees + date de notification, ecrites une par une
+function confirmerNotification(prod){
+  var g=groupeDe(prod);delete mailOuverts[prod];
+  if(g){
+    var auj=new Date().toLocaleDateString('fr-FR');
+    g.deps.forEach(function(d){d.infoANotifier=false;d.infoNotifieeLe=auj;});
+    save();
+    g.deps.reduce(function(pr,d){return pr.then(function(){return syncDepenseRow(d,origineOf(d));});},Promise.resolve());
+    renderAll();
+  }
+  renderPreparationEmails();
+}
+function annulerNotification(prod){delete mailOuverts[prod];renderPreparationEmails();}
+function ouvrirPreparationEmails(){mailOuverts={};renderPreparationEmails();document.getElementById('modal-mail').classList.add('show');}
+function fermerPreparationEmails(){document.getElementById('modal-mail').classList.remove('show');}
+function renderPreparationEmails(){
+  var groupes=groupesANotifier(),box=document.getElementById('mail-body');
+  if(!groupes.length){box.innerHTML='<div class="note">Aucune information producteur a notifier.</div>';return;}
+  box.innerHTML='<div class="note" style="margin-top:0">Pour chaque producteur : cliquez sur <b>Ouvrir l\'email</b>, puis collez le contenu (Ctrl+V) dans le corps du message Outlook. Apres l\'envoi, confirmez pour marquer les lignes comme notifiees.</div>'
+    +groupes.map(function(g){
+      var em=emailsDe(g.prod),etat=mailOuverts[g.prod];
+      var p=JSON.stringify(g.prod).replace(/"/g,'&quot;');
+      var dest=em.valides.length?echapHtml(em.valides.join('; '))
+        :'<span style="color:var(--rouge);font-weight:600">Aucun email - a saisir dans Outlook (et a completer dans l\'onglet Producteurs)</span>';
+      if(em.invalides.length)dest+=' <span style="color:var(--rouge)">(ignore, format invalide : '+echapHtml(em.invalides.join('; '))+')</span>';
+      var actions=!etat
+        ?'<button class="mini" onclick="ouvrirEmail('+p+')">Ouvrir l\'email</button>'
+        :'<span style="font-weight:600;font-size:13px">Email envoye ?</span> <button class="mini" onclick="confirmerNotification('+p+')">Oui, marquer comme notifie</button> <button class="mini sec" onclick="annulerNotification('+p+')">Non</button>'
+          +(etat==='echec'
+            ?'<div style="color:var(--rouge);font-size:12px;margin-top:4px">La copie automatique a echoue : <button class="mini sec" onclick="recopierContenu('+p+')">Recopier le contenu</button> puis collez-le (Ctrl+V) dans Outlook.</div>'
+            :'<div class="note" style="margin-top:4px">Contenu copie : collez-le (Ctrl+V) dans le corps du message. <a href="#" onclick="recopierContenu('+p+');return false;">Recopier</a></div>');
+      var lignes=g.deps.map(function(d){
+        return '<tr><td>'+echapHtml(d.mes)+'</td><td>'+echapHtml(d.des)+'</td><td>'+echapHtml(d.nfacture)+'</td><td style="white-space:nowrap">'+eur(d.ht)+'</td><td>'+echapHtml(d.infoProducteur)+'</td></tr>';
+      }).join('');
+      return '<div class="card" style="margin:12px 0 0">'
+        +'<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start"><div><b>'+echapHtml(g.prod)+'</b> - '+g.deps.length+' ligne(s)<div style="font-size:12px;margin-top:2px">A : '+dest+'</div></div><div style="text-align:right">'+actions+'</div></div>'
+        +'<div class="scroll" style="margin-top:8px"><table><thead><tr><th>Mesure</th><th>Designation</th><th>N facture</th><th>HT</th><th>Information</th></tr></thead><tbody>'+lignes+'</tbody></table></div></div>';
+    }).join('');
+}
 
 // ---- modales ----
 var modalCb=null;
