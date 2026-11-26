@@ -923,10 +923,13 @@ function corpsMailHtml(deps){
     +lignes+'</table><p>'+MAIL_FIN+'</p><p>Cordialement,</p></div>';
 }
 function corpsMailTexte(deps){
-  return 'Bonjour,\n\n'+MAIL_INTRO+'\n\n'+deps.map(function(d){
+  // Retours a la ligne \r\n et espaces ordinaires (les espaces insecables du format fr-FR passent mal dans un mailto)
+  return ('Bonjour,\n\n'+MAIL_INTRO+'\n\n'+deps.map(function(d){
     return '- Mesure '+(d.mes||'')+' | '+(d.des||'')+' | Facture '+(d.nfacture||'-')+' | '+montantMail(d.ht)+'\n  '+(d.infoProducteur||'').trim().replace(/\r?\n/g,'\n  ');
-  }).join('\n')+'\n\n'+MAIL_FIN+'\n\nCordialement,';
+  }).join('\n\n')+'\n\n'+MAIL_FIN+'\n\nCordialement,').replace(/[\u00a0\u202f]/g,' ').replace(/\r?\n/g,'\r\n');
 }
+// Au-dela de cette longueur, certains postes tronquent le lien mailto : le texte passe alors par le presse-papiers
+var MAILTO_MAX=1800;
 // Copie HTML + texte : API Clipboard si disponible, sinon selection d'un bloc cache + execCommand('copy')
 function copierContenuMail(html,texte){
   if(navigator.clipboard&&window.ClipboardItem&&window.isSecureContext){
@@ -945,13 +948,25 @@ function copierParSelection(html){
   sel.removeAllRanges();box.innerHTML='';
   return ok;
 }
+function lancerMailto(href){
+  var a=document.createElement('a');a.href=href;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+}
+// Cas normal : l'email s'ouvre avec le texte deja dans le corps (texte brut).
+// Texte trop long pour un lien mailto : le corps contient un rappel "collez ici" et le contenu est copie (Ctrl+V).
 function ouvrirEmail(prod){
   var g=groupeDe(prod);if(!g)return;
-  var em=emailsDe(prod);
-  copierContenuMail(corpsMailHtml(g.deps),corpsMailTexte(g.deps)).then(function(ok){
-    var a=document.createElement('a');
-    a.href='mailto:'+em.valides.join(',')+'?subject='+encodeURIComponent(MAIL_OBJET);
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
+  var debut='mailto:'+emailsDe(prod).valides.join(',')+'?subject='+encodeURIComponent(MAIL_OBJET)+'&body=';
+  var texte=corpsMailTexte(g.deps);
+  var href=debut+encodeURIComponent(texte);
+  if(href.length<=MAILTO_MAX){
+    lancerMailto(href);
+    mailOuverts[prod]='texte';
+    renderPreparationEmails();
+    return;
+  }
+  copierContenuMail(corpsMailHtml(g.deps),texte).then(function(ok){
+    lancerMailto(debut+encodeURIComponent('>>> COLLER ICI LE DETAIL DES LIGNES (Ctrl+V) <<<\r\n\r\n'));
     mailOuverts[prod]=ok?'ok':'echec';
     renderPreparationEmails();
   });
@@ -978,7 +993,7 @@ function fermerPreparationEmails(){document.getElementById('modal-mail').classLi
 function renderPreparationEmails(){
   var groupes=groupesANotifier(),box=document.getElementById('mail-body');
   if(!groupes.length){box.innerHTML='<div class="note">Aucune information producteur a notifier.</div>';return;}
-  box.innerHTML='<div class="note" style="margin-top:0">Pour chaque producteur : cliquez sur <b>Ouvrir l\'email</b>, puis collez le contenu (Ctrl+V) dans le corps du message Outlook. Apres l\'envoi, confirmez pour marquer les lignes comme notifiees.</div>'
+  box.innerHTML='<div class="note" style="margin-top:0">Pour chaque producteur : cliquez sur <b>Ouvrir l\'email</b> : le message Outlook s\'ouvre avec le detail des lignes. Apres l\'envoi, confirmez pour marquer les lignes comme notifiees.</div>'
     +groupes.map(function(g){
       var em=emailsDe(g.prod),etat=mailOuverts[g.prod];
       var p=JSON.stringify(g.prod).replace(/"/g,'&quot;');
@@ -988,9 +1003,11 @@ function renderPreparationEmails(){
       var actions=!etat
         ?'<button class="mini" onclick="ouvrirEmail('+p+')">Ouvrir l\'email</button>'
         :'<span style="font-weight:600;font-size:13px">Email envoye ?</span> <button class="mini" onclick="confirmerNotification('+p+')">Oui, marquer comme notifie</button> <button class="mini sec" onclick="annulerNotification('+p+')">Non</button>'
-          +(etat==='echec'
+          +(etat==='texte'
+            ?'<div class="note" style="margin-top:4px">Le message s\'ouvre avec le texte deja rempli.</div>'
+            :etat==='echec'
             ?'<div style="color:var(--rouge);font-size:12px;margin-top:4px">La copie automatique a echoue : <button class="mini sec" onclick="recopierContenu('+p+')">Recopier le contenu</button> puis collez-le (Ctrl+V) dans Outlook.</div>'
-            :'<div class="note" style="margin-top:4px">Contenu copie : collez-le (Ctrl+V) dans le corps du message. <a href="#" onclick="recopierContenu('+p+');return false;">Recopier</a></div>');
+            :'<div class="note" style="margin-top:4px">Texte trop long pour etre pre-rempli : il a ete copie, collez-le (Ctrl+V) a l\'endroit indique dans le message. <a href="#" onclick="recopierContenu('+p+');return false;">Recopier</a></div>');
       var lignes=g.deps.map(function(d){
         return '<tr><td>'+echapHtml(d.mes)+'</td><td>'+echapHtml(d.des)+'</td><td>'+echapHtml(d.nfacture)+'</td><td style="white-space:nowrap">'+eur(d.ht)+'</td><td>'+echapHtml(d.infoProducteur)+'</td></tr>';
       }).join('');
